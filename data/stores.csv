@@ -1,0 +1,4 @@
+store_id,store_name,location,region,store_type
+STR001,Downtown Tech & Home,"New York, NY",East,Flagship
+STR002,Suburban Megastore,"Austin, TX",South,Superstore
+STR003,Metro Express Retail,"Chicago, IL",Midwest,Express

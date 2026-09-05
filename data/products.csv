@@ -1,0 +1,26 @@
+product_id,product_name,category,cost_price,unit_price,reorder_point,target_stock_level
+PRD001,Wireless Ergonomic Mouse,Electronics,29.99,49.99,30,100
+PRD002,Mechanical Gaming Keyboard,Electronics,55.0,89.99,20,60
+PRD003,Noise-Canceling Headphones,Electronics,110.0,179.99,15,50
+PRD004,USB-C Multi-Port Hub,Electronics,18.5,34.99,40,120
+PRD005,4K Ultra HD Monitor 27-inch,Electronics,210.0,329.99,10,35
+PRD006,Stainless Steel Travel Mug,Home & Kitchen,12.0,24.99,50,150
+PRD007,Smart LED Bulb 4-Pack,Home & Kitchen,19.0,39.99,35,100
+PRD008,Air Purifier HEPA Filter,Home & Kitchen,45.0,79.99,20,60
+PRD009,Digital Kitchen Scale,Home & Kitchen,10.0,19.99,25,75
+PRD010,Compact Espresso Machine,Home & Kitchen,130.0,219.99,10,30
+PRD011,Executive Notebook Set,Office Supplies,8.0,16.99,40,120
+PRD012,Heavy-Duty Paper Shredder,Office Supplies,65.0,119.99,15,40
+PRD013,Gel Ink Pens 12-Pack,Office Supplies,4.5,9.99,60,200
+PRD014,Adjustable LED Desk Lamp,Office Supplies,22.0,44.99,25,80
+PRD015,Ergonomic Memory Foam Cushion,Office Supplies,18.0,34.99,30,90
+PRD016,Organic Whole Coffee Beans 1lb,Groceries,6.5,13.99,50,150
+PRD017,Matcha Green Tea Powder 100g,Groceries,11.0,22.99,30,90
+PRD018,Artisan Dark Chocolate Bar 70%,Groceries,2.2,4.99,80,250
+PRD019,Cold Brew Coffee Concentrate 32oz,Groceries,5.0,10.99,40,120
+PRD020,Raw Organic Wildflower Honey 16oz,Groceries,7.5,14.99,35,100
+PRD021,Breathable Running Socks 3-Pack,Apparel,5.0,12.99,50,160
+PRD022,Lightweight Gym Duffel Bag,Apparel,16.0,32.99,25,75
+PRD023,Moisture-Wicking Athletic Tee,Apparel,11.5,24.99,40,120
+PRD024,Insulated Water Bottle 32oz,Apparel,13.0,27.99,45,130
+PRD025,Polarized UV400 Sports Sunglasses,Apparel,20.0,42.99,20,60
