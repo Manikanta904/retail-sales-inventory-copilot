@@ -114,23 +114,27 @@ class AnalyticsService:
             coverage_days = self.calculate_stock_coverage(stock, avg_daily_sales)
             reorder_pt = float(p_info["reorder_point"])
 
-            is_critical = coverage_days < CRITICAL_STOCK_DAYS_THRESHOLD
-            is_low_stock = stock <= reorder_pt
             is_out_of_stock = stock == 0
+            is_critical = stock > 0 and coverage_days < CRITICAL_STOCK_DAYS_THRESHOLD
+            is_low_stock = stock > 0 and not is_critical and stock <= reorder_pt
 
-            if is_critical or is_low_stock or is_out_of_stock:
-                status = (
-                    "OUT_OF_STOCK"
-                    if is_out_of_stock
-                    else ("CRITICAL_STOCK_OUT_RISK" if is_critical else "LOW_STOCK")
-                )
+            if is_out_of_stock or is_critical or is_low_stock:
+                if is_out_of_stock:
+                    status = "OUT_OF_STOCK"
+                    evidence_prefix = "OUT OF STOCK"
+                elif is_critical:
+                    status = "CRITICAL_STOCK_OUT_RISK"
+                    evidence_prefix = "PREDICTED STOCK-OUT RISK"
+                else:
+                    status = "LOW_STOCK"
+                    evidence_prefix = "LOW STOCK WARNING"
 
                 coverage_str = (
-                    "Infinity" if coverage_days == float("inf") else f"{coverage_days:.2f} days"
+                    "0.00 days" if is_out_of_stock else ("Infinity" if coverage_days == float("inf") else f"{coverage_days:.2f} days")
                 )
 
                 evidence = (
-                    f"Store {s_id} ({s_info['store_name']}), Product {p_id} ({p_info['product_name']}): "
+                    f"{evidence_prefix} - Store {s_id} ({s_info['store_name']}), Product {p_id} ({p_info['product_name']}): "
                     f"Current stock is {int(stock)} units (Reorder Point: {int(reorder_pt)}). "
                     f"Avg daily sales over past {lookback_days} days ({start_dt.strftime('%Y-%m-%d')} to {as_of_dt.strftime('%Y-%m-%d')}) "
                     f"is {avg_daily_sales:.2f} units/day. Stock coverage is {coverage_str} "
@@ -151,6 +155,7 @@ class AnalyticsService:
                     "status": status,
                     "evidence": evidence,
                 })
+
 
         return sorted(results, key=lambda x: (x["stock_on_hand"], x["stock_coverage_days"]))
 
@@ -262,94 +267,107 @@ class AnalyticsService:
     ) -> List[Dict[str, Any]]:
         """
         Detects significant sales spikes and drops by comparing a recent period against a historical baseline.
+        If end_date is None, scans candidate windows across the dataset timeline to capture peak spike/drop events.
         """
-        if end_date is None:
-            _, max_dt = self.data_service.get_date_range()
-            end_dt = max_dt
+        min_dt, max_dt = self.data_service.get_date_range()
+
+        if end_date is not None:
+            eval_dates = [pd.to_datetime(end_date)]
         else:
-            end_dt = pd.to_datetime(end_date)
-
-        recent_start_dt = end_dt - pd.Timedelta(days=recent_days - 1)
-        baseline_end_dt = recent_start_dt - pd.Timedelta(days=1)
-        baseline_start_dt = baseline_end_dt - pd.Timedelta(days=baseline_days - 1)
-
-        df_recent = self.data_service.get_sales_df(
-            start_date=recent_start_dt, end_date=end_dt, store_id=store_id, product_id=product_id
-        )
-        df_baseline = self.data_service.get_sales_df(
-            start_date=baseline_start_dt, end_date=baseline_end_dt, store_id=store_id, product_id=product_id
-        )
+            min_eval_dt = min_dt + pd.Timedelta(days=recent_days + baseline_days - 1)
+            eval_dates = pd.date_range(min_eval_dt, max_dt) if min_eval_dt <= max_dt else [max_dt]
 
         df_products = self.data_service.df_products
         df_stores = self.data_service.df_stores
-
-        results: List[Dict[str, Any]] = []
-
-        # Iterate over all store and product pairs present in store/product catalog
         stores = df_stores[df_stores["store_id"] == store_id] if store_id else df_stores
         products = df_products[df_products["product_id"] == product_id] if product_id else df_products
 
-        for _, s_info in stores.iterrows():
-            s_id = s_info["store_id"]
-            for _, p_info in products.iterrows():
-                p_id = p_info["product_id"]
+        peak_events: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
 
-                r_sales = df_recent[(df_recent["store_id"] == s_id) & (df_recent["product_id"] == p_id)]
-                b_sales = df_baseline[(df_baseline["store_id"] == s_id) & (df_baseline["product_id"] == p_id)]
+        for end_dt in eval_dates:
+            recent_start_dt = end_dt - pd.Timedelta(days=recent_days - 1)
+            baseline_end_dt = recent_start_dt - pd.Timedelta(days=1)
+            baseline_start_dt = baseline_end_dt - pd.Timedelta(days=baseline_days - 1)
 
-                recent_units = float(r_sales["units_sold"].sum()) if not r_sales.empty else 0.0
-                baseline_units = float(b_sales["units_sold"].sum()) if not b_sales.empty else 0.0
+            df_recent = self.data_service.get_sales_df(
+                start_date=recent_start_dt, end_date=end_dt, store_id=store_id, product_id=product_id
+            )
+            df_baseline = self.data_service.get_sales_df(
+                start_date=baseline_start_dt, end_date=baseline_end_dt, store_id=store_id, product_id=product_id
+            )
 
-                recent_avg = recent_units / float(recent_days)
-                baseline_avg = baseline_units / float(baseline_days)
+            for _, s_info in stores.iterrows():
+                s_id = s_info["store_id"]
+                for _, p_info in products.iterrows():
+                    p_id = p_info["product_id"]
 
-                if baseline_avg > 0:
-                    ratio = recent_avg / baseline_avg
-                else:
-                    ratio = float("inf") if recent_avg > 0 else 1.0
+                    r_sales = df_recent[(df_recent["store_id"] == s_id) & (df_recent["product_id"] == p_id)]
+                    b_sales = df_baseline[(df_baseline["store_id"] == s_id) & (df_baseline["product_id"] == p_id)]
 
-                is_spike = (
-                    (ratio >= SPIKE_RATIO_THRESHOLD and recent_units >= 5)
-                    or (baseline_avg == 0 and recent_avg >= 1.5)
-                )
-                is_drop = (
-                    ratio <= DROP_RATIO_THRESHOLD and baseline_units >= 10
-                )
+                    recent_units = float(r_sales["units_sold"].sum()) if not r_sales.empty else 0.0
+                    baseline_units = float(b_sales["units_sold"].sum()) if not b_sales.empty else 0.0
 
-                if is_spike or is_drop:
-                    event_type = "SALES_SPIKE" if is_spike else "SALES_DROP"
-                    pct_change = (
-                        self.calculate_percentage_change(recent_avg, baseline_avg)
-                        if baseline_avg > 0
-                        else (999.0 if is_spike else -100.0)
+                    recent_avg = recent_units / float(recent_days)
+                    baseline_avg = baseline_units / float(baseline_days)
+
+                    if baseline_avg > 0:
+                        ratio = recent_avg / baseline_avg
+                    else:
+                        ratio = float("inf") if recent_avg > 0 else 1.0
+
+                    is_spike = (
+                        (ratio >= SPIKE_RATIO_THRESHOLD and recent_units >= 5)
+                        or (baseline_avg == 0 and recent_avg >= 1.5)
+                    )
+                    is_drop = (
+                        ratio <= DROP_RATIO_THRESHOLD and baseline_units >= 10
                     )
 
-                    evidence = (
-                        f"Store {s_id} ({s_info['store_name']}), Product {p_id} ({p_info['product_name']}): "
-                        f"{event_type} detected! Recent period ({recent_start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}) "
-                        f"avg daily sales: {recent_avg:.2f} units/day (Total: {int(recent_units)} units). "
-                        f"Baseline period ({baseline_start_dt.strftime('%Y-%m-%d')} to {baseline_end_dt.strftime('%Y-%m-%d')}) "
-                        f"avg daily sales: {baseline_avg:.2f} units/day (Total: {int(baseline_units)} units). "
-                        f"Ratio: {ratio:.2f}x (Percentage change: {pct_change}%)."
-                    )
+                    if is_spike or is_drop:
+                        event_type = "SALES_SPIKE" if is_spike else "SALES_DROP"
+                        pct_change = (
+                            self.calculate_percentage_change(recent_avg, baseline_avg)
+                            if baseline_avg > 0
+                            else (999.0 if is_spike else -100.0)
+                        )
 
-                    results.append({
-                        "store_id": s_id,
-                        "store_name": s_info["store_name"],
-                        "product_id": p_id,
-                        "product_name": p_info["product_name"],
-                        "category": p_info["category"],
-                        "event_type": event_type,
-                        "recent_avg_daily_sales": round(recent_avg, 2),
-                        "baseline_avg_daily_sales": round(baseline_avg, 2),
-                        "sales_ratio": round(ratio, 2) if ratio != float("inf") else 999.0,
-                        "percentage_change": pct_change,
-                        "recent_units_sold": int(recent_units),
-                        "baseline_units_sold": int(baseline_units),
-                        "evidence": evidence,
-                    })
+                        evidence = (
+                            f"Store {s_id} ({s_info['store_name']}), Product {p_id} ({p_info['product_name']}): "
+                            f"{event_type} detected! Recent period ({recent_start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}) "
+                            f"avg daily sales: {recent_avg:.2f} units/day (Total: {int(recent_units)} units). "
+                            f"Baseline period ({baseline_start_dt.strftime('%Y-%m-%d')} to {baseline_end_dt.strftime('%Y-%m-%d')}) "
+                            f"avg daily sales: {baseline_avg:.2f} units/day (Total: {int(baseline_units)} units). "
+                            f"Ratio: {ratio:.2f}x (Percentage change: {pct_change}%)."
+                        )
 
+                        event_data = {
+                            "store_id": s_id,
+                            "store_name": s_info["store_name"],
+                            "product_id": p_id,
+                            "product_name": p_info["product_name"],
+                            "category": p_info["category"],
+                            "event_type": event_type,
+                            "recent_avg_daily_sales": round(recent_avg, 2),
+                            "baseline_avg_daily_sales": round(baseline_avg, 2),
+                            "sales_ratio": round(ratio, 2) if ratio != float("inf") else 999.0,
+                            "percentage_change": pct_change,
+                            "recent_units_sold": int(recent_units),
+                            "baseline_units_sold": int(baseline_units),
+                            "evidence": evidence,
+                        }
+
+                        key = (s_id, p_id, event_type)
+                        if key not in peak_events:
+                            peak_events[key] = event_data
+                        else:
+                            if event_type == "SALES_SPIKE" and ratio > peak_events[key]["sales_ratio"]:
+                                peak_events[key] = event_data
+                            elif event_type == "SALES_DROP" and ratio < peak_events[key]["sales_ratio"]:
+                                peak_events[key] = event_data
+
+        results = list(peak_events.values())
         return sorted(results, key=lambda x: abs(x["percentage_change"] or 0), reverse=True)
+
 
     def get_product_performance(
         self,

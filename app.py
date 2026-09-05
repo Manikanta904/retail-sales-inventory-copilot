@@ -1,5 +1,6 @@
 import uvicorn
 from fastapi import FastAPI
+from backend.api.routes import router
 
 app = FastAPI(
     title="Retail: Sales and Inventory Copilot",
@@ -7,10 +8,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
-
-@app.get("/api/health")
-def health_check():
-    return {"status": "ok", "message": "Service is healthy"}
+# Include API Router
+app.include_router(router)
 
 
 if __name__ == "__main__":

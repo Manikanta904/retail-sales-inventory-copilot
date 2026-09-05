@@ -1,11 +1,26 @@
 """
 Configuration settings and centralized thresholds for Retail Sales and Inventory Copilot.
 """
+import os
 from pathlib import Path
 
 # Base directory paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 DATA_DIR = BASE_DIR / "data"
+
+# Automatically load local .env file into os.environ if present
+ENV_FILE = BASE_DIR / ".env"
+if ENV_FILE.exists():
+    with open(ENV_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip("'\"")
+                if key and key not in os.environ:
+                    os.environ[key] = val
+
 
 # Dataset paths
 STORES_CSV_PATH = DATA_DIR / "stores.csv"
@@ -28,3 +43,11 @@ SPIKE_RATIO_THRESHOLD = 1.8  # Recent daily sales >= 1.8x baseline daily sales i
 DROP_RATIO_THRESHOLD = 0.4  # Recent daily sales <= 0.4x baseline daily sales indicates a drop
 DEFAULT_RECENT_PERIOD_DAYS = 14  # Default duration for recent window
 DEFAULT_BASELINE_PERIOD_DAYS = 30  # Default duration for historical baseline comparison window
+
+# Query & Validation Limits
+MAX_QUESTION_LENGTH = 500  # Maximum character length for copilot natural language query
+
+# Official Hackathon Compliant Models
+GEMINI_LLM_MODEL = "gemini-3.5-flash-lite"
+GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"
+
