@@ -1,4 +1,6 @@
-# PS03 — Retail: Sales and Inventory Copilot
+TRACK_ID=PS03
+
+#  Retail: Sales and Inventory Copilot
 
 This repository contains the initial foundation for **PS03 — Retail: Sales and Inventory Copilot** for NexusTiQ24.
 
