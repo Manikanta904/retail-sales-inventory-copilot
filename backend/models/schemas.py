@@ -113,6 +113,8 @@ class StructuredItem(BaseModel):
     target_stock_level: Optional[int] = Field(None, description="Target optimal stock level")
     sales_ratio: Optional[float] = Field(None, description="Sales anomaly ratio")
     percentage_change: Optional[float] = Field(None, description="Percentage change in sales")
+    revenue_change_pct: Optional[float] = Field(None, description="Revenue percentage change")
+    units_change_pct: Optional[float] = Field(None, description="Units percentage change")
     revenue: Optional[float] = Field(None, description="Total revenue")
     units_sold: Optional[int] = Field(None, description="Total units sold")
     evidence: Optional[str] = Field(None, description="Full numerical evidence string")

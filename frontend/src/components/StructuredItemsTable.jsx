@@ -264,9 +264,15 @@ export default function StructuredItemsTable({ items }) {
                         <strong style={{ color: 'var(--primary)' }}>${item.revenue?.toLocaleString()}</strong>
                       </td>
                       <td>
-                        <span className={`pill-btn ${item.revenue_change_pct >= 0 ? 'active' : ''}`}>
-                          {item.revenue_change_pct >= 0 ? `+${item.revenue_change_pct}%` : `${item.revenue_change_pct}%`}
-                        </span>
+                        {(() => {
+                          const pct = item.percentage_change ?? item.revenue_change_pct ?? item.units_change_pct;
+                          if (pct === undefined || pct === null) return <span className="source-tag">N/A</span>;
+                          return (
+                            <span className={`pill-btn ${pct >= 0 ? 'active' : ''}`}>
+                              {pct >= 0 ? `+${pct}%` : `${pct}%`}
+                            </span>
+                          );
+                        })()}
                       </td>
                     </>
                   )}
