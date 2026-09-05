@@ -86,6 +86,11 @@ class AnalyticsService:
             start_date=start_dt, end_date=as_of_dt, store_id=store_id, product_id=product_id
         )
 
+        # Pre-aggregate sales sums per store_id and product_id for fast lookup
+        sales_sums = (
+            df_sales.groupby(["store_id", "product_id"])["units_sold"].sum().to_dict()
+        )
+
         df_products = self.data_service.df_products
         df_stores = self.data_service.df_stores
 
@@ -104,11 +109,8 @@ class AnalyticsService:
             p_info = p_match.iloc[0]
             s_info = s_match.iloc[0]
 
-            # Calculate actual sales over lookback window
-            p_sales = df_sales[
-                (df_sales["store_id"] == s_id) & (df_sales["product_id"] == p_id)
-            ]
-            total_units_sold = float(p_sales["units_sold"].sum()) if not p_sales.empty else 0.0
+            # Fast vectorized sales sum lookup
+            total_units_sold = float(sales_sums.get((s_id, p_id), 0.0))
             avg_daily_sales = total_units_sold / float(lookback_days)
 
             coverage_days = self.calculate_stock_coverage(stock, avg_daily_sales)
@@ -187,6 +189,11 @@ class AnalyticsService:
             start_date=start_dt, end_date=as_of_dt, store_id=store_id, product_id=product_id
         )
 
+        # Pre-aggregate sales sums per store_id and product_id for fast lookup
+        sales_sums = (
+            df_sales.groupby(["store_id", "product_id"])["units_sold"].sum().to_dict()
+        )
+
         df_products = self.data_service.df_products
         df_stores = self.data_service.df_stores
 
@@ -205,10 +212,8 @@ class AnalyticsService:
             p_info = p_match.iloc[0]
             s_info = s_match.iloc[0]
 
-            p_sales = df_sales[
-                (df_sales["store_id"] == s_id) & (df_sales["product_id"] == p_id)
-            ]
-            total_units_sold = float(p_sales["units_sold"].sum()) if not p_sales.empty else 0.0
+            # Fast vectorized sales sum lookup
+            total_units_sold = float(sales_sums.get((s_id, p_id), 0.0))
             avg_daily_sales = total_units_sold / float(lookback_days)
 
             coverage_days = self.calculate_stock_coverage(stock, avg_daily_sales)
@@ -267,9 +272,19 @@ class AnalyticsService:
     ) -> List[Dict[str, Any]]:
         """
         Detects significant sales spikes and drops by comparing a recent period against a historical baseline.
-        If end_date is None, scans candidate windows across the dataset timeline to capture peak spike/drop events.
+        If end_date is None, uses fast vectorized pandas rolling windows across the dataset timeline.
         """
         min_dt, max_dt = self.data_service.get_date_range()
+
+        df_sales = self.data_service.df_sales
+        df_products = self.data_service.df_products
+        df_stores = self.data_service.df_stores
+
+        stores = df_stores[df_stores["store_id"] == store_id] if store_id else df_stores
+        products = df_products[df_products["product_id"] == product_id] if product_id else df_products
+
+        store_map = dict(zip(df_stores["store_id"], df_stores["store_name"]))
+        prod_info = {r["product_id"]: (r["product_name"], r["category"]) for _, r in df_products.iterrows()}
 
         if end_date is not None:
             eval_dates = [pd.to_datetime(end_date)]
@@ -277,96 +292,107 @@ class AnalyticsService:
             min_eval_dt = min_dt + pd.Timedelta(days=recent_days + baseline_days - 1)
             eval_dates = pd.date_range(min_eval_dt, max_dt) if min_eval_dt <= max_dt else [max_dt]
 
-        df_products = self.data_service.df_products
-        df_stores = self.data_service.df_stores
-        stores = df_stores[df_stores["store_id"] == store_id] if store_id else df_stores
-        products = df_products[df_products["product_id"] == product_id] if product_id else df_products
+        # Filter sales dataframe to relevant stores and products
+        s_ids = set(stores["store_id"])
+        p_ids = set(products["product_id"])
+        sub_sales = df_sales[(df_sales["store_id"].isin(s_ids)) & (df_sales["product_id"].isin(p_ids))]
 
+        # Reindex to full daily grid per store & product for accurate rolling calculations
+        idx = pd.MultiIndex.from_product(
+            [pd.date_range(min_dt, max_dt), sorted(list(s_ids)), sorted(list(p_ids))],
+            names=["date", "store_id", "product_id"]
+        )
+
+        grouped = sub_sales.groupby(["date", "store_id", "product_id"])["units_sold"].sum().reindex(idx, fill_value=0).reset_index()
+        grouped = grouped.sort_values(["store_id", "product_id", "date"])
+
+        # Calculate rolling 14-day recent sum and shifted 30-day baseline sum
+        grouped["recent_units"] = grouped.groupby(["store_id", "product_id"])["units_sold"].transform(
+            lambda x: x.rolling(recent_days, min_periods=recent_days).sum()
+        )
+        grouped["baseline_units"] = grouped.groupby(["store_id", "product_id"])["units_sold"].transform(
+            lambda x: x.shift(recent_days).rolling(baseline_days, min_periods=baseline_days).sum()
+        )
+
+        # Filter to requested evaluation dates
+        eval_mask = grouped["date"].isin(eval_dates) & grouped["recent_units"].notna() & grouped["baseline_units"].notna()
+        valid = grouped[eval_mask].copy()
+
+        if valid.empty:
+            return []
+
+        valid["recent_avg"] = valid["recent_units"] / float(recent_days)
+        valid["baseline_avg"] = valid["baseline_units"] / float(baseline_days)
+
+        valid["ratio"] = np.where(
+            valid["baseline_avg"] > 0,
+            valid["recent_avg"] / valid["baseline_avg"],
+            np.where(valid["recent_avg"] > 0, np.inf, 1.0)
+        )
+
+        valid["is_spike"] = (
+            ((valid["ratio"] >= SPIKE_RATIO_THRESHOLD) & (valid["recent_units"] >= 5))
+            | ((valid["baseline_avg"] == 0) & (valid["recent_avg"] >= 1.5))
+        )
+        valid["is_drop"] = (valid["ratio"] <= DROP_RATIO_THRESHOLD) & (valid["baseline_units"] >= 10)
+
+        # Deduplicate peak events per (store_id, product_id, event_type)
         peak_events: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
 
-        for end_dt in eval_dates:
-            recent_start_dt = end_dt - pd.Timedelta(days=recent_days - 1)
+        for _, r in valid[valid["is_spike"] | valid["is_drop"]].iterrows():
+            event_type = "SALES_SPIKE" if r["is_spike"] else "SALES_DROP"
+            s_id = r["store_id"]
+            p_id = r["product_id"]
+            s_name = store_map.get(s_id, s_id)
+            p_name, category = prod_info.get(p_id, (p_id, "General"))
+
+            recent_start_dt = r["date"] - pd.Timedelta(days=recent_days - 1)
             baseline_end_dt = recent_start_dt - pd.Timedelta(days=1)
             baseline_start_dt = baseline_end_dt - pd.Timedelta(days=baseline_days - 1)
 
-            df_recent = self.data_service.get_sales_df(
-                start_date=recent_start_dt, end_date=end_dt, store_id=store_id, product_id=product_id
+            pct_change = (
+                self.calculate_percentage_change(r["recent_avg"], r["baseline_avg"])
+                if r["baseline_avg"] > 0
+                else (999.0 if event_type == "SALES_SPIKE" else -100.0)
             )
-            df_baseline = self.data_service.get_sales_df(
-                start_date=baseline_start_dt, end_date=baseline_end_dt, store_id=store_id, product_id=product_id
+
+            evidence = (
+                f"Store {s_id} ({s_name}), Product {p_id} ({p_name}): "
+                f"{event_type} detected! Recent period ({recent_start_dt.strftime('%Y-%m-%d')} to {r['date'].strftime('%Y-%m-%d')}) "
+                f"avg daily sales: {r['recent_avg']:.2f} units/day (Total: {int(r['recent_units'])} units). "
+                f"Baseline period ({baseline_start_dt.strftime('%Y-%m-%d')} to {baseline_end_dt.strftime('%Y-%m-%d')}) "
+                f"avg daily sales: {r['baseline_avg']:.2f} units/day (Total: {int(r['baseline_units'])} units). "
+                f"Ratio: {r['ratio']:.2f}x (Percentage change: {pct_change}%)."
             )
 
-            for _, s_info in stores.iterrows():
-                s_id = s_info["store_id"]
-                for _, p_info in products.iterrows():
-                    p_id = p_info["product_id"]
+            event_data = {
+                "store_id": s_id,
+                "store_name": s_name,
+                "product_id": p_id,
+                "product_name": p_name,
+                "category": category,
+                "event_type": event_type,
+                "recent_avg_daily_sales": round(r["recent_avg"], 2),
+                "baseline_avg_daily_sales": round(r["baseline_avg"], 2),
+                "sales_ratio": round(r["ratio"], 2) if r["ratio"] != float("inf") else 999.0,
+                "percentage_change": pct_change,
+                "recent_units_sold": int(r["recent_units"]),
+                "baseline_units_sold": int(r["baseline_units"]),
+                "evidence": evidence,
+            }
 
-                    r_sales = df_recent[(df_recent["store_id"] == s_id) & (df_recent["product_id"] == p_id)]
-                    b_sales = df_baseline[(df_baseline["store_id"] == s_id) & (df_baseline["product_id"] == p_id)]
-
-                    recent_units = float(r_sales["units_sold"].sum()) if not r_sales.empty else 0.0
-                    baseline_units = float(b_sales["units_sold"].sum()) if not b_sales.empty else 0.0
-
-                    recent_avg = recent_units / float(recent_days)
-                    baseline_avg = baseline_units / float(baseline_days)
-
-                    if baseline_avg > 0:
-                        ratio = recent_avg / baseline_avg
-                    else:
-                        ratio = float("inf") if recent_avg > 0 else 1.0
-
-                    is_spike = (
-                        (ratio >= SPIKE_RATIO_THRESHOLD and recent_units >= 5)
-                        or (baseline_avg == 0 and recent_avg >= 1.5)
-                    )
-                    is_drop = (
-                        ratio <= DROP_RATIO_THRESHOLD and baseline_units >= 10
-                    )
-
-                    if is_spike or is_drop:
-                        event_type = "SALES_SPIKE" if is_spike else "SALES_DROP"
-                        pct_change = (
-                            self.calculate_percentage_change(recent_avg, baseline_avg)
-                            if baseline_avg > 0
-                            else (999.0 if is_spike else -100.0)
-                        )
-
-                        evidence = (
-                            f"Store {s_id} ({s_info['store_name']}), Product {p_id} ({p_info['product_name']}): "
-                            f"{event_type} detected! Recent period ({recent_start_dt.strftime('%Y-%m-%d')} to {end_dt.strftime('%Y-%m-%d')}) "
-                            f"avg daily sales: {recent_avg:.2f} units/day (Total: {int(recent_units)} units). "
-                            f"Baseline period ({baseline_start_dt.strftime('%Y-%m-%d')} to {baseline_end_dt.strftime('%Y-%m-%d')}) "
-                            f"avg daily sales: {baseline_avg:.2f} units/day (Total: {int(baseline_units)} units). "
-                            f"Ratio: {ratio:.2f}x (Percentage change: {pct_change}%)."
-                        )
-
-                        event_data = {
-                            "store_id": s_id,
-                            "store_name": s_info["store_name"],
-                            "product_id": p_id,
-                            "product_name": p_info["product_name"],
-                            "category": p_info["category"],
-                            "event_type": event_type,
-                            "recent_avg_daily_sales": round(recent_avg, 2),
-                            "baseline_avg_daily_sales": round(baseline_avg, 2),
-                            "sales_ratio": round(ratio, 2) if ratio != float("inf") else 999.0,
-                            "percentage_change": pct_change,
-                            "recent_units_sold": int(recent_units),
-                            "baseline_units_sold": int(baseline_units),
-                            "evidence": evidence,
-                        }
-
-                        key = (s_id, p_id, event_type)
-                        if key not in peak_events:
-                            peak_events[key] = event_data
-                        else:
-                            if event_type == "SALES_SPIKE" and ratio > peak_events[key]["sales_ratio"]:
-                                peak_events[key] = event_data
-                            elif event_type == "SALES_DROP" and ratio < peak_events[key]["sales_ratio"]:
-                                peak_events[key] = event_data
+            key = (s_id, p_id, event_type)
+            if key not in peak_events:
+                peak_events[key] = event_data
+            else:
+                if event_type == "SALES_SPIKE" and r["ratio"] > peak_events[key]["sales_ratio"]:
+                    peak_events[key] = event_data
+                elif event_type == "SALES_DROP" and r["ratio"] < peak_events[key]["sales_ratio"]:
+                    peak_events[key] = event_data
 
         results = list(peak_events.values())
         return sorted(results, key=lambda x: abs(x["percentage_change"] or 0), reverse=True)
+
 
 
     def get_product_performance(

@@ -141,18 +141,18 @@ def validate_copilot_query(
     words = [re.sub(r"[^\w]", "", w) for w in raw_words]
     stop_words = {
         "what", "where", "which", "who", "how", "why", "tell", "me", "my", "i", "your", "our", "us",
-        "about", "show", "is", "are", "was", "were", "the", "a", "an", "for", "in", "of", "to", "and", "or",
+        "about", "show", "is", "are", "was", "were", "the", "a", "an", "for", "in", "of", "to", "and", "or", "at", "by", "from", "on", "with", "into", "through", "during", "before", "after",
         "this", "that", "these", "those", "any", "all", "products", "items", "store", "stores", "sales", "inventory",
-        "stock", "out", "low", "many", "units", "sold", "give", "details", "information", "data", "list",
-        "get", "find", "search", "likely", "run", "top", "best", "worst", "high", "low", "most", "least",
+        "stock", "out", "low", "many", "much", "more", "less", "most", "least", "too", "lots", "some", "units", "sold", "give", "details", "information", "data", "list",
+        "get", "find", "search", "likely", "run", "top", "best", "worst", "high", "low",
         "trending", "recent", "arent", "did", "does", "do", "cause", "caused", "increase", "increased", "fall", "fell",
-        "have", "has", "had", "having", "there", "we", "be", "been", "being", "can", "could", "would", "should"
+        "have", "has", "had", "having", "there", "we", "be", "been", "being", "can", "could", "would", "should",
+        "name", "names", "number", "numbers", "count", "counts", "total", "totals", "amount", "amounts", "up", "go",
+        "cover", "across", "network", "dataset", "doing", "anything", "something", "getting", "close", "far", "off"
     }
-
 
     # Extract non-stop words
     query_tokens = [w.lower() for w in words if w.lower() not in stop_words and len(w) > 0]
-
 
     if query_tokens:
         catalog_text = (
@@ -163,26 +163,40 @@ def validate_copilot_query(
             + " "
             + " ".join(df_products["product_id"].astype(str)).lower()
         )
-        
+        if not df_stores.empty:
+            catalog_text += (
+                " "
+                + " ".join(df_stores["store_name"].astype(str)).lower()
+                + " "
+                + " ".join(df_stores["store_id"].astype(str)).lower()
+                + " "
+                + " ".join(df_stores["location"].astype(str)).lower()
+                + " "
+                + " ".join(df_stores["region"].astype(str)).lower()
+                + " "
+                + " ".join(df_stores["store_type"].astype(str)).lower()
+            )
+
         # Tokenize catalog into discrete word set
         catalog_tokens = set(re.findall(r"\b\w+\b", catalog_text))
 
         # Generic domain terms that can appear in broad analytical questions
         generic_domain_terms = {
-            "performance", "perform", "performing", "revenue", "demand", "month", "week", "today", "year",
-            "slow", "moving", "slow-moving", "stagnant", "spike", "spikes", "surge", "surges", "drop", "drops",
-            "risk", "overstock", "overstocked", "overstocking", "surplus", "understock", "reorder",
+            "performance", "perform", "performing", "performed", "revenue", "demand", "month", "week", "today", "year", "date", "dates",
+            "period", "timeframe", "latest", "earliest", "transactions", "transaction", "historical", "time", "day", "days",
+            "slow", "moving", "slow-moving", "stagnant", "spike", "spikes", "surge", "surges", "drop", "drops", "losing", "lose", "lost",
+            "risk", "overstock", "overstocked", "overstocking", "surplus", "understock", "reorder", "danger", "stage", "level",
+            "status", "replenish", "replenishment", "shortage", "worry", "worrying", "around", "sitting", "excessive",
+            "suddenly", "started", "start", "taking", "took", "jumped", "jump", "fallen", "badly", "move", "moved", "current", "going", "carry", "carries",
             "category", "categories", "pricing", "margin", "trend", "trends", "stockout", "stock-out",
             "stockouts", "stock-outs", "depletion", "selling", "sales", "sold", "attention", "urgent",
             "priority", "issue", "issues", "problem", "problems", "needs", "item", "items", "product", "products",
             "store", "stores", "location", "locations", "unusual", "abnormal", "anomaly", "anomalies",
             "significant", "unprecedented", "well", "good", "bad", "situation", "status", "summary",
             "overview", "condition", "state", "competitor", "competitors", "promotion", "promotions",
-            "advertising", "demographics"
+            "advertising", "demographics", "catalog", "catalogue", "sell", "network", "region", "regions",
+            "type", "types", "flagship", "superstore", "express", "city", "state", "states", "reorder", "much", "more", "too"
         }
-
-
-
 
         # Non-generic tokens are specific product names / entities (e.g. "playstation", "xbox", "mouse", "coffee")
         specific_entity_tokens = [k for k in query_tokens if k not in generic_domain_terms]
@@ -203,3 +217,4 @@ def validate_copilot_query(
                 )
 
     return ValidationResult(is_valid=True)
+

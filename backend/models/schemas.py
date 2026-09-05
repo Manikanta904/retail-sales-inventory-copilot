@@ -96,6 +96,28 @@ class RecommendationItem(BaseModel):
     expected_impact: str = Field(..., description="Expected business impact")
 
 
+class StructuredItem(BaseModel):
+    product_id: Optional[str] = Field(None, description="Product ID")
+    product_name: Optional[str] = Field(None, description="Product Name")
+    store_id: Optional[str] = Field(None, description="Store ID")
+    store_name: Optional[str] = Field(None, description="Store Name")
+    category: Optional[str] = Field(None, description="Category")
+    status: Optional[str] = Field(None, description="Issue status classification")
+    issue_type: Optional[str] = Field(None, description="Issue type classification")
+    event_type: Optional[str] = Field(None, description="Event type for anomalies")
+    severity: Optional[str] = Field(None, description="Severity: HIGH, MEDIUM, LOW")
+    stock_on_hand: Optional[int] = Field(None, description="Current stock level")
+    avg_daily_sales: Optional[float] = Field(None, description="Average daily sales units/day")
+    stock_coverage_days: Optional[float] = Field(None, description="Days of inventory coverage remaining")
+    reorder_point: Optional[int] = Field(None, description="Reorder point threshold")
+    target_stock_level: Optional[int] = Field(None, description="Target optimal stock level")
+    sales_ratio: Optional[float] = Field(None, description="Sales anomaly ratio")
+    percentage_change: Optional[float] = Field(None, description="Percentage change in sales")
+    revenue: Optional[float] = Field(None, description="Total revenue")
+    units_sold: Optional[int] = Field(None, description="Total units sold")
+    evidence: Optional[str] = Field(None, description="Full numerical evidence string")
+
+
 class CopilotQueryResponse(BaseModel):
     status: str = Field("success", description="Status string: success or insufficient_data")
     answer: str = Field(..., description="Direct answer to the query")
@@ -103,6 +125,8 @@ class CopilotQueryResponse(BaseModel):
     evidence: List[EvidenceItem] = Field(default_factory=list, description="Structured numerical evidence")
     assumptions: List[AssumptionItem] = Field(default_factory=list, description="Assumptions made")
     recommendations: List[RecommendationItem] = Field(default_factory=list, description="Actionable recommendations")
+    structured_items: List[StructuredItem] = Field(default_factory=list, description="Authoritative Python structured item records")
+    summary_metrics: Dict[str, Any] = Field(default_factory=dict, description="Pre-calculated summary counts from Python analytics")
     data_sources: List[str] = Field(default_factory=list, description="Data files/tables queried")
     data_sufficient: bool = Field(True, description="Flag indicating if data was sufficient")
 
